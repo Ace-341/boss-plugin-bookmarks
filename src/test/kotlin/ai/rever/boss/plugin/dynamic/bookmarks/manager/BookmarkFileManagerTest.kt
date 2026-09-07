@@ -72,16 +72,32 @@ class BookmarkFileManagerTest {
         assertTrue(fileManager.saveCollections(original))
         val reloaded = fileManager.loadCollections()
 
-        // Compares identity and content rather than whole objects: BookmarkSerializer
-        // leaves kotlinx encodeDefaults at false, so defaulted fields — createdAt
-        // among them — are never written and are regenerated on load. A whole-object
-        // assertion only passes when save and reload land in the same millisecond.
-        assertEquals(original.map { it.id }, reloaded.map { it.id })
-        assertEquals(original.map { it.name }, reloaded.map { it.name })
-        assertEquals(
-            original.map { c -> c.bookmarks.map { it.id to it.tabConfig.url } },
-            reloaded.map { c -> c.bookmarks.map { it.id to it.tabConfig.url } },
-        )
+        // Whole-object equality, createdAt included: BookmarkSerializer now sets
+        // encodeDefaults = true, so a defaulted field is written as of the moment
+        // it was actually constructed rather than regenerated from the constructor
+        // default on load.
+        assertEquals(original, reloaded)
+    }
+
+    @Test
+    fun `createdAt survives a save that lands in the same millisecond it was constructed`() = runBlocking {
+        // Regression for #9: with encodeDefaults left at kotlinx's default (false), the
+        // generated serializer re-evaluates a *computed* default expression at serialisation
+        // time and skips the field when it matches the instance's value - so
+        // Bookmark(createdAt = Clock.System.now()...) immediately saved in the construction
+        // millisecond silently dropped createdAt, while the exact same object saved a
+        // millisecond later did not. 200 iterations with no delay reproduced the drop on ~196.
+        repeat(200) { i ->
+            val original = collection("Race-$i", bookmarkCount = 1)
+            assertTrue(fileManager.saveCollections(listOf(original)))
+            val reloaded = fileManager.loadCollections().single()
+
+            assertEquals(
+                original.bookmarks.single().createdAt,
+                reloaded.bookmarks.single().createdAt,
+                "createdAt was dropped on save #$i",
+            )
+        }
     }
 
     /** Identity of the file currently at [path], or null if it has none. */

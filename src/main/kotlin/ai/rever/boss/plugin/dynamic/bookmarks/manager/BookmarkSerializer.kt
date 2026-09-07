@@ -21,6 +21,13 @@ internal object BookmarkSerializer {
         ignoreUnknownKeys = true
         // Allow default values for missing fields
         coerceInputValues = true
+        // Every field with a default (createdAt, lastAccessedAt, isFavorite, tags, notes,
+        // targetWorkspaces, ...) is otherwise omitted from the written JSON and re-evaluated
+        // from the constructor default on load. For createdAt = Clock.System.now() that means
+        // it silently resets to "now" on every save/load round-trip - worse, kotlinx re-evaluates
+        // a computed default at SERIALISATION time, so a save landing in the same millisecond as
+        // construction also drops it even with an equality check, not only across a real reload.
+        encodeDefaults = true
     }
 
     /**
