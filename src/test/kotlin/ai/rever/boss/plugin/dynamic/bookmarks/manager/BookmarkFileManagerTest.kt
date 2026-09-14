@@ -6,6 +6,10 @@ import ai.rever.boss.plugin.workspace.TabConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.nio.file.Files
@@ -80,24 +84,25 @@ class BookmarkFileManagerTest {
     }
 
     @Test
-    fun `createdAt survives a save that lands in the same millisecond it was constructed`() = runBlocking {
-        // Regression for #9: with encodeDefaults left at kotlinx's default (false), the
-        // generated serializer re-evaluates a *computed* default expression at serialisation
-        // time and skips the field when it matches the instance's value - so
-        // Bookmark(createdAt = Clock.System.now()...) immediately saved in the construction
-        // millisecond silently dropped createdAt, while the exact same object saved a
-        // millisecond later did not. 200 iterations with no delay reproduced the drop on ~196.
-        repeat(200) { i ->
-            val original = collection("Race-$i", bookmarkCount = 1)
-            assertTrue(fileManager.saveCollections(listOf(original)))
-            val reloaded = fileManager.loadCollections().single()
+    fun `saved JSON explicitly contains every defaulted bookmark and collection field`() = runBlocking {
+        val original = collection("Defaults", bookmarkCount = 1)
+        assertTrue(fileManager.saveCollections(listOf(original)))
 
-            assertEquals(
-                original.bookmarks.single().createdAt,
-                reloaded.bookmarks.single().createdAt,
-                "createdAt was dropped on save #$i",
-            )
-        }
+        // Inspect the persisted document: immediate reload equality can hide a
+        // missing timestamp when construction and reload share a millisecond.
+        val saved = Json.parseToJsonElement(
+            tempDir.resolve(BookmarkFileManager.COLLECTIONS_FILE).readText()
+        ).jsonArray.single().jsonObject
+        assertEquals(setOf("id", "name", "bookmarks", "isFavorite", "createdAt"), saved.keys)
+        assertEquals(original.createdAt.toString(), saved.getValue("createdAt").jsonPrimitive.content)
+        val bookmark = saved.getValue("bookmarks").jsonArray.single().jsonObject
+        assertEquals(
+            setOf("id", "tabConfig", "workspaceName", "targetWorkspaceName", "targetPanelId",
+                "targetWorkspaces", "notes", "tags", "createdAt", "lastAccessedAt"),
+            bookmark.keys,
+        )
+        assertEquals(original.bookmarks.single().createdAt.toString(), bookmark.getValue("createdAt").jsonPrimitive.content)
+        assertEquals(listOf(original), fileManager.loadCollections())
     }
 
     /** Identity of the file currently at [path], or null if it has none. */
